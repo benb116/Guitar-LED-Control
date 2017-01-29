@@ -6,66 +6,65 @@
 void initTimer1();
 void initADC();
 void initPins();
+
 float calcValAvg();
-float calcIAvg();
+float calcIAvg(int );
 void filterCalc(float avg);
 int calcDiff(float freq, float tru);
-void lightLED(int LEDindex);
+void tuneLED();
+void prettyLED();
+void prettyDrip();
 
-#define RES 3000 // freq of measurements (Hz)
+void lightLEDs();
+
+#define RES 600 // freq of measurements (Hz)
 #define AMPTHRESH 2.5
 #define AVGTOL 10
 #define FRACTOL 0.05
+#define PRETTYTHRESH 100
+#define PRETTYMAX 500
 
+volatile int ledstatus[9] = {0};
+
+enum Mode {
+	TUNE, METRO, SHOW
+};
+
+int currentMode = TUNE;
+
+int i, j, k;
 int val[RES] = {0};
 int filterval[RES] = {0};
-
 int peaks[8] = {0};
 int peakdif[7] = {0};
 
-int i;
-int LED;
+int prettyMode = 0;
 
 int main(void)
 {
-	m_red(ON);
 	m_clockdivide(4); // System clock 1 MHz
+	m_red(ON);
 	m_bus_init();
 	m_usb_init();
 	while(!m_usb_isconnected()); // wait for a connection
-
+	initTimer1();
+	initADC();
+	initPins();
 	sei(); // Enable interrupts
-	m_green(ON);
 	while (1) {
-		filterCalc(calcValAvg()); // Remove ADC values that are not above the threshold
-		int peakcount = 0;
-		for (int j = 0; j < RES-1; ++j) {
-			// Count how many separate peaks there are
-			// i.e. where one value is 0 and the next is non-zero
-			if ((filterval[j] == 0) && (filterval[j+1] > 0)) {
-				peaks[peakcount] = j;
-				peakcount++;
-				if (peakcount == 8) { // Limit the number of peaks to 8
-					i = RES - 1;
-				}
-			}
-		}
-		for (int k = 0; k < (peakcount-1); ++k) {
-			peakdif[k] = peaks[k+1]-peaks[k];
-		}
-		float avgdiff = calcIAvg(peakdif);
-		float freq = (float) RES / avgdiff;
-		m_usb_tx_int((int) (freq * 10));
-
-		if (freq < 70) {LED = 0;} 
-		else if (freq < 96.2) {LED = calcDiff(freq, 82.4);} 
-		else if (freq < 128.4) {LED = calcDiff(freq, 110.0);} 
-		else if (freq < 171.4) {LED = calcDiff(freq, 146.8);} 
-		else if (freq < 221.4) {LED = calcDiff(freq, 196.0);} 
-		else if (freq < 288.3) {LED = calcDiff(freq, 246.9);} 
-		else if (freq < 350) {LED = calcDiff(freq, 329.6);} 
-		else {LED = 0;}
-		lightLED(LED);
+		// switch(currentMode) {
+		// 	case TUNE:
+		// tuneLED();
+		// 		break;
+		// 	case METRO:
+		// 		// BPMLED(currentBPM);
+		// 		break;
+		// 	case SHOW:
+		// 		prettyLED();
+		// 		break;
+		// }
+		// lightLEDs();
+		if (ledstatus[1]) {m_red(ON);} else {m_red(OFF);}
 	}
 	return 0;
 }
@@ -75,6 +74,22 @@ ISR(TIMER1_OVF_vect) { // When OCR1A is reached
 		i = 0;
 	}
 	val[i] = ADC;
+	if (ADC > 100) {
+		m_green(ON);
+		ledstatus[1] = 1;
+		// set(PORTB, 3);
+	} else {
+		m_green(OFF);
+		ledstatus[1] = 0;
+		// clear(PORTB, 3);
+	}
+	// if (prettyMode) {
+	// 	if (i % (RES/5) == 0) {
+	// 		prettyDrip();
+	// 	}
+	// }
+	lightLEDs();	aq
+
 	i++;
 }
 
@@ -100,16 +115,16 @@ void initADC() {
 	set(ADCSRA, ADPS1); // Set clock scale CHANGE IF clockdivide CHANGES!!!!!!
 	set(ADCSRA, ADPS0); // Set clock scale CHANGE IF clockdivide CHANGES!!!!!!
 
-	set(DIDR0, ADC0D); // Set as analog input F0
+    set(DIDR2, ADC11D); // Set as analog input B4
 
 	set(ADCSRA, ADIE); // Enable interrupting
 
 	set(ADCSRA, ADATE); // Set triggering
 
-	clear(ADCSRB, MUX5); // Look at F0
+	set(ADCSRB, MUX5); // Look at B4
 	clear(ADMUX, MUX2);
-	clear(ADMUX, MUX1);
-	clear(ADMUX, MUX0);
+	set(ADMUX, MUX1);
+	set(ADMUX, MUX0);
 
 	set(ADCSRA, ADEN); // Conversion
 	set(ADCSRA, ADSC);
@@ -118,31 +133,93 @@ void initADC() {
 }
 
 void initPins() {
-	DDRB |= (1 << 2) | (1 << 3) | (1 << 7);
-	DDRD |= (1 << 0) | (1 << 1) | (1 << 2);
-	DDRF |= (1 << 1) | (1 << 4) | (1 << 5);
-				//^ Pin num to set
+	set(DDRB, 2);
+	set(DDRB, 3);
+	set(DDRB, 7);
+	set(DDRD, 0);
+	set(DDRD, 1);
+	set(DDRD, 2);
+	set(DDRD, 3);
+	set(DDRF, 0);
+	set(DDRF, 1);
+	clear(DDRB, 4);
+
+	clear(PORTB, 2);
+	clear(PORTB, 3);
+	clear(PORTB, 7);
+	clear(PORTD, 0);
+	clear(PORTD, 1);
+	clear(PORTD, 2);
+	clear(PORTD, 3);
+	clear(PORTF, 0);
+	clear(PORTF, 1);
+	clear(PORTB, 4);
+}
+
+void tuneLED() {
+	prettyMode = 0;
+	int LED = 0;
+
+	filterCalc(calcValAvg()); // Remove ADC values that are not above the threshold
+	int peakcount = 0;
+	for (j = i; j < RES; ++j) {
+		// Count how many separate peaks there are
+		// i.e. where one value is 0 and the next is non-zero
+		// Limit to 8 peaks
+		if ((filterval[j] == 0) && (filterval[j+1] > 0 && peakcount < 8)) {
+			peaks[peakcount] = j;
+			peakcount++;
+		}
+	}
+	for (j = 0; j < (i-1); ++j) {
+		// Count how many separate peaks there are
+		// i.e. where one value is 0 and the next is non-zero
+		if ((filterval[j] == 0) && (filterval[j+1] > 0 && peakcount < 8)) {
+			peaks[peakcount] = j + RES;
+			peakcount++;
+		}
+	}
+	for (k = 0; k < (peakcount-1); ++k) {
+		peakdif[k] = peaks[k+1]-peaks[k];
+	}
+	float avgdiff = calcIAvg(peakcount);
+	float freq = (float) RES / avgdiff;
+	m_usb_tx_int((int) (freq * 10));
+	m_usb_tx_string("\n");
+
+	if 		(freq < 70) 	{LED = 0;} 
+	else if (freq < 96.2) 	{LED = calcDiff(freq, 82.4);} 
+	else if (freq < 128.4) 	{LED = calcDiff(freq, 110.0);} 
+	else if (freq < 171.4) 	{LED = calcDiff(freq, 146.8);} 
+	else if (freq < 221.4) 	{LED = calcDiff(freq, 196.0);} 
+	else if (freq < 288.3) 	{LED = calcDiff(freq, 246.9);} 
+	else if (freq < 350) 	{LED = calcDiff(freq, 329.6);} 
+	else 					{LED = 0;}
+
+	for (j = 0; j < 9; ++j) {
+		ledstatus[j] = (j == LED - 1);
+	}
 }
 
 float calcValAvg() {
 	int sum = 0;
-	for (i=0; i<RES; i++) {
-		sum = sum + val[i];
+	for (j=0; j<RES; j++) {
+		sum = sum + val[j];
 	}
 	return (float)sum / RES;
 }
 
-float calcIAvg() {
+float calcIAvg(int peakcount) {
 	int sum = 0;
-	for (i=0; i<8-1; i++) {
-		sum = sum + val[i];
+	for (j=0; j<(peakcount-1); j++) {
+		sum = sum + peakdif[j];
 	}
-	return (float)sum / (8-1);
+	return (float)sum / (peakcount-1);
 }
 
 void filterCalc(float avg) {
-	for (int i = 0; i < RES; ++i) {
-		filterval[i] = val[i] * (val[i] > avg * AMPTHRESH);
+	for (j = 0; j < RES; ++j) {
+		filterval[j] = val[j] * (val[j] > avg * AMPTHRESH);
 	}
 }
 
@@ -162,14 +239,32 @@ int calcDiff(float freq, float tru) {
 	return LE;
 }
 
-void lightLED(int LEDindex) {
-	if (LEDindex == 1) {set(PORTB, 2);} else {clear(PORTB, 2);}
-	if (LEDindex == 2) {set(PORTB, 3);} else {clear(PORTB, 3);}
-	if (LEDindex == 3) {set(PORTB, 7);} else {clear(PORTB, 7);}
-	if (LEDindex == 4) {set(PORTD, 0);} else {clear(PORTD, 0);}
-	if (LEDindex == 5) {set(PORTD, 1);} else {clear(PORTD, 1);}
-	if (LEDindex == 6) {set(PORTD, 2);} else {clear(PORTD, 2);}
-	if (LEDindex == 7) {set(PORTF, 1);} else {clear(PORTF, 1);}
-	if (LEDindex == 8) {set(PORTF, 4);} else {clear(PORTF, 4);}
-	if (LEDindex == 9) {set(PORTF, 5);} else {clear(PORTF, 5);}
+void prettyLED() {
+	float sigAvg = calcValAvg();
+	if (sigAvg < PRETTYTHRESH) {
+		prettyDrip();
+		prettyMode = 1;
+	} else {
+		float frac = sigAvg / PRETTYMAX;
+		OCR1B = OCR1A * frac;
+		prettyMode = 2;
+	}
+}
+int dripIndex = 0;
+void prettyDrip() {
+	for (j = 0; j < 9; ++j) {
+		ledstatus[j] = (j - dripIndex < 2);
+	}
+}
+
+void lightLEDs() {
+	if (ledstatus[0]) {set(PORTB, 2);} else {clear(PORTB, 2);}
+	if (ledstatus[1]) {set(PORTB, 3);} else {clear(PORTB, 3);}
+	if (ledstatus[2]) {set(PORTB, 7);} else {clear(PORTB, 7);}
+	if (ledstatus[3]) {set(PORTD, 0);} else {clear(PORTD, 0);}
+	if (ledstatus[4]) {set(PORTD, 1);} else {clear(PORTD, 1);}
+	if (ledstatus[5]) {set(PORTD, 2);} else {clear(PORTD, 2);}
+	if (ledstatus[6]) {set(PORTD, 3);} else {clear(PORTD, 3);}
+	if (ledstatus[7]) {set(PORTF, 0);} else {clear(PORTF, 0);}
+	if (ledstatus[8]) {set(PORTF, 1);} else {clear(PORTF, 1);}
 }
