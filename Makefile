@@ -41,7 +41,7 @@ else
 $(error DEVICE = $(DEVICE) is unknown.)
 endif
 
-COMPILE = avr-gcc -Wall -Os -DF_CPU=$(CLOCK) -mmcu=$(DEVICE)
+COMPILE = avr-gcc -Wall -Os -DF_CPU=$(CLOCK) -mmcu=$(DEVICE) -std=c99
 
 SRCDIR = src
 INCDIR = inc	# directory for header files
