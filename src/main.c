@@ -14,6 +14,7 @@ int persShift[NUMPERS];
 int pers2nd[NUMPERS/2];
 int pers3rd[NUMPERS/3];
 
+int harmonics[4] = {0};
 
 int enable = 1;
 int h = 0;
@@ -29,7 +30,7 @@ void initPins();
 
 void tuneCheck();
 void recordPer(int tick);
-float calcFreq();
+void calcFreq();
 int calcDiff(float freq, float tru);
 void tuneLED();
 
@@ -143,26 +144,86 @@ void initPins() {
 	clear(PORTB, 4); // Disable pull-up resistor
 }
 
-void tuneLED() {
-	float freq = calcFreq();
-	int LED;
-
-	if 		(freq < 70) 	{LED = 0;} 
-	else if (freq < 96.2) 	{LED = calcDiff(freq, 82.40);} 
-	else if (freq < 128.4) 	{LED = calcDiff(freq, 110.0);} 
-	else if (freq < 171.4) 	{LED = calcDiff(freq, 146.8);} 
-	else if (freq < 221.4) 	{LED = calcDiff(freq, 196.0);} 
-	else if (freq < 288.3) 	{LED = calcDiff(freq, 246.9);} 
-	else if (freq < 350) 	{LED = calcDiff(freq, 329.6);} 
-	else 					{LED = 0;}
-
-	int j;
-	for (j = 0; j < 9; ++j) {
-		ledstatus[j] = (j == (LED - 1));
-	}
+int closeto(int in, int comp) {
+	int diff = in - comp;
+	if (diff < 0) {diff = diff * -1;}
+	return (diff < 10);
 }
 
-float calcFreq() {
+void tuneLED() {
+	calcFreq();
+	int LED;
+
+	/*
+		If 2 or 3 ~ 240 & 4 > 300 -> E
+		If 2 or 3 ~ 180 -> A
+		If 1/2 ~ 135 & 2/4 ~ 270 -> D
+		If 2 or 3 ~ 100 -> G
+		If 1 or 2 ~ 80 -> B
+		If 1 is ~ 60 -> Hi E
+	*/
+	// m_usb_tx_string("\n");
+	// m_usb_tx_int(harmonics[1]);	
+	// m_usb_tx_string(" ");
+	// m_usb_tx_int(closeto(harmonics[1], 240));
+
+	if (closeto(harmonics[1], 243) || closeto(harmonics[2], 243)) { // E
+		m_usb_tx_string(" E");
+		// if (closeto(harmonics[1], 240)) {
+		// 	m_usb_tx_int(harmonics[1]);			
+		// } else {
+		// 	m_usb_tx_int(harmonics[2]);
+		// }
+	} else if (closeto(harmonics[1], 100) || closeto(harmonics[2], 100)) { // G
+		m_usb_tx_string(" G");
+		// if (closeto(harmonics[1], 100)) {
+		// 	m_usb_tx_int(harmonics[1]);			
+		// } else {
+		// 	m_usb_tx_int(harmonics[2]);
+		// }
+	} else if (closeto(harmonics[1], 80) || (closeto(harmonics[0], 80) && closeto(harmonics[2], 240)) || (closeto(harmonics[0], 160) && closeto(harmonics[2], 320))) { // B
+		m_usb_tx_string(" B");
+		// if (closeto(harmonics[1], 80)) {
+		// 	m_usb_tx_int(harmonics[1]);			
+		// } else {
+		// 	m_usb_tx_int(harmonics[0]);
+		// }
+	} else if (closeto(harmonics[0], 60) && closeto(harmonics[1], 120) && closeto(harmonics[3], 240)) { // Hi E
+		m_usb_tx_string(" Eh");
+		// m_usb_tx_int(harmonics[0]);
+	} else if ((closeto(harmonics[0], 136) && closeto(harmonics[3], 540))) { // D
+		// || (closeto(harmonics[2], 180) && harmonics[0], 50)
+		m_usb_tx_string(" D");
+		// if (closeto(harmonics[0], 136)) {
+		// 	m_usb_tx_int(harmonics[0]);			
+		// } else {
+		// 	m_usb_tx_int(harmonics[1]);
+		// }
+	} else { // A
+		m_usb_tx_string(" A");
+		// if (closeto(harmonics[1], 180)) {
+		// 	m_usb_tx_int(harmonics[1]);			
+		// } else {
+		// 	m_usb_tx_int(harmonics[2]);
+		// }
+	}
+
+	// if 		(freq < 70) 	{LED = 0;} 
+	// else if (freq < 96.2) 	{LED = calcDiff(freq, 82.40);} // 242.7
+	// else if (freq < 128.4) 	{LED = calcDiff(freq, 110.0);} // 181.8
+	// else if (freq < 171.4) 	{LED = calcDiff(freq, 146.8);} // 136.2
+	// else if (freq < 221.4) 	{LED = calcDiff(freq, 196.0);} // 102.0
+	// else if (freq < 288.3) 	{LED = calcDiff(freq, 246.9);} // 81.00
+	// else if (freq < 350) 	{LED = calcDiff(freq, 329.6);} // 60.68
+	// else 					{LED = 0;}
+
+	// int j;
+	// for (j = 0; j < 9; ++j) {
+	// 	ledstatus[j] = (j == (LED - 1));
+	// }
+}
+
+void calcFreq() {
 	int j;
 	int k = (perInd+1);
 	for (j = k; j < NUMPERS; ++j) {
@@ -194,7 +255,10 @@ float calcFreq() {
 	m_usb_tx_int(persShift[2]+persShift[1]+persShift[0]);
 	m_usb_tx_string(" ");
 	m_usb_tx_int(persShift[3]+persShift[2]+persShift[1]+persShift[0]);
-
+	harmonics[0] = persShift[0];
+	harmonics[1] = harmonics[0] + persShift[1];
+	harmonics[2] = harmonics[1] + persShift[2];
+	harmonics[3] = harmonics[2] + persShift[3];
 }
 // Find the index of the minimum value of an array
 int min_ind(int array[], int size) {
