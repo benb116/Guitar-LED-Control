@@ -3,9 +3,9 @@
 #include "m_rf.h"
 #include "m_usb.h"
 
-#define RES 5000
-#define NUMPERS 30
-#define PERDIFF 10
+#define RES 20000
+#define NUMPERS 20
+#define PERDIFF 1
 #define FREQTOL 0.05
 
 volatile int ledstatus[9] = {0};
@@ -47,7 +47,7 @@ void lightLEDs();
 int main(void)
 {
 	m_disableJTAG();
-	m_clockdivide(4); // System clock 1 MHz
+	m_clockdivide(0); // System clock 1 MHz
 	m_bus_init();
 	m_usb_init();
 	while(!m_usb_isconnected()) {}
@@ -63,8 +63,15 @@ int main(void)
 		// dripLED();
 		tuneLED();
 		lightLEDs();
-		m_usb_tx_int(perInd);
-		m_usb_tx_string("\n");
+		// m_usb_tx_int(pers2nd[0]);
+		// m_usb_tx_string(" ");
+		// m_usb_tx_int(pers2nd[1]);
+		// m_usb_tx_string(" ");
+		// m_usb_tx_int(pers2nd[2]);
+		// m_usb_tx_string(" ");
+		// m_usb_tx_int(pers2nd[3]);
+		// m_usb_tx_int(avg(pers2nd, (NUMPERS/2)));
+		// m_usb_tx_string("\n");
 	}
 	return 0;
 }
@@ -108,7 +115,7 @@ void initTimer1() {
 	set(TIMSK1, TOIE1); // Interrupt when overflow
 
 	// 1 MHz clock / timer presale / sample rate
-	int count = (1000000 / 8 / RES);
+	int count = (16000000 / 8 / RES);
 	OCR1A = count;
 }
 
@@ -164,22 +171,31 @@ float calcFreq() {
 	for (j = 0; j < k; ++j) {
 		persShift[(j+k)] = pers[j];
 	}
-	int maxPer = persShift[max_ind(persShift, NUMPERS)];
-	int minPer = persShift[min_ind(persShift, NUMPERS)];
-
-	if (maxPer - minPer < PERDIFF) {
-
-	}
-
 
 	for (j = 0; j < (NUMPERS/2); ++j) {
 		pers2nd[j] = persShift[(2*j)] + persShift[(2*j-1)] ;
 	}
+
+	// int maxPer = pers2nd[max_ind(pers2nd, NUMPERS)];
+	// int minPer = pers2nd[min_ind(pers2nd, NUMPERS)];
+
+	// if (maxPer - minPer > PERDIFF) {
+		// m_usb_tx_int((maxPer + minPer)/2);
+		// m_usb_tx_string("\n");
+	// }
 	for (j = 0; j < (NUMPERS/3); ++j) {
 		pers3rd[j] = persShift[(3*j)] + persShift[(3*j-1)] + persShift[(3*j-2)];
 	}
-}
+	m_usb_tx_string("\n");
+	m_usb_tx_int(persShift[0]);
+	m_usb_tx_string(" ");
+	m_usb_tx_int(persShift[1]+persShift[0]);
+	m_usb_tx_string(" ");
+	m_usb_tx_int(persShift[2]+persShift[1]+persShift[0]);
+	m_usb_tx_string(" ");
+	m_usb_tx_int(persShift[3]+persShift[2]+persShift[1]+persShift[0]);
 
+}
 // Find the index of the minimum value of an array
 int min_ind(int array[], int size) {
 	int min = array[0];
