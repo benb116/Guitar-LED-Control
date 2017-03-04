@@ -2,12 +2,13 @@
 #include "m_bus.h"
 #include "m_usb.h"
 
-#define RES 40000 // Freq of measurements in Hz
+#define RES 70000 // Freq of measurements in Hz
 #define NUMPERS 6 // How many recordings to hold onto
 #define FREQTOL 0.05 // How close to the true frequency is good.
 #define	DRIPFREQ 20
 #define TWELTHROOTTWO 1.059463094
-#define CORRECT 0.97514
+#define CORRECTGAIN 0.97899257
+#define CORRECTBUMP 0.5885
 
 static float freqs[6] = {82.4, 110.0, 146.8, 196.0, 246.9, 329.6}; // Hz
 static float perticks[6] = {0}; // To be calculated
@@ -70,7 +71,6 @@ int main(void)
 	}
 
 	m_red(ON);
-
 	while(1) {
 		switch(mode) {
 			case 0:
@@ -222,18 +222,18 @@ float calcFreq() {
 	int Pc = persShift[2];
 	int Pd = persShift[3];
 	int Pe = persShift[4];
-	m_usb_tx_string("\r\n");
+	m_usb_tx_string("\r");
 
 	m_usb_tx_int(Pa);
 	m_usb_tx_string(" ");
 	m_usb_tx_int(Pb);
 	m_usb_tx_string(" ");
-	m_usb_tx_int(Pc);
-	m_usb_tx_string(" ");
-	m_usb_tx_int(Pd);
-	m_usb_tx_string(" ");
-	m_usb_tx_int(Pe);
-	m_usb_tx_string(" ");
+	// m_usb_tx_int(Pc);
+	// m_usb_tx_string(" ");
+	// m_usb_tx_int(Pd);
+	// m_usb_tx_string(" ");
+	// m_usb_tx_int(Pe);
+	// m_usb_tx_string(" ");
 
 	// Find a repeating pattern and determine the period of repetition
 	int sumtick = 1;
@@ -250,14 +250,17 @@ float calcFreq() {
 	} else if (closeto(Pa, Pe, 2)) {
 		sumtick = Pa + Pb + Pc + Pd;
 	}
-	m_usb_tx_int(sumtick);
-	m_usb_tx_string(" ");
+	// m_usb_tx_int(sumtick);
+	// m_usb_tx_string(" ");
 	// Convert to a frequency
 	float prefreq = RES / (float) sumtick;
-	m_usb_tx_int((int)(prefreq*10));	
-	float freq = prefreq * CORRECT;
-	m_usb_tx_string(" ");
-	m_usb_tx_int((int)(freq*10));	
+	// m_usb_tx_int((int)(prefreq*10));	
+	// m_usb_tx_string(" ");
+	float freq = prefreq * CORRECTGAIN + CORRECTBUMP;
+	m_usb_tx_int((int)(freq));	
+	m_usb_tx_string(".");
+	m_usb_tx_int(((int)(freq*10) % 10));
+	m_usb_tx_string(" ");	
 	return freq;
 }
 
@@ -281,7 +284,9 @@ int calcDiff(float freq, float tru) {
 	if (LEDind < 1) {LEDind = 1;}
 	if (LEDind > 9) {LEDind = 9;}
 	int LE = LEDind + 0.5;
-
+	m_usb_tx_int((int)(tru));	
+	m_usb_tx_string(" ");
+	m_usb_tx_int(LE);
 	return LE;
 }
 
