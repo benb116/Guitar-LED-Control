@@ -1,36 +1,42 @@
 #include "m_general.h"
 #include "m_bus.h"
-#include "m_rf.h"
 #include "m_usb.h"
 
-#define RES 20000
-#define NUMPERS 20
-#define PERDIFF 1
-#define FREQTOL 0.05
+#define RES 40000 // Freq of measurements in Hz
+#define NUMPERS 6 // How many recordings to hold onto
+#define FREQTOL 0.05 // How close to the true frequency is good.
+#define	DRIPFREQ 20
+#define TWELTHROOTTWO 1.059463094
+#define CORRECT 0.97514
 
-volatile int ledstatus[9] = {0};
-int pers[NUMPERS] = {0};
-int persShift[NUMPERS];
-int pers2nd[NUMPERS/2];
-int pers3rd[NUMPERS/3];
+static float freqs[6] = {82.4, 110.0, 146.8, 196.0, 246.9, 329.6}; // Hz
+static float perticks[6] = {0}; // To be calculated
+int j;
 
-int harmonics[4] = {0};
+volatile int ledstatus[9] = {0}; // LED is on/off -> 1/0
+int pers[NUMPERS] = {0}; // Most recent period data
+int persShift[NUMPERS] = {0}; // Shifted to be newest to oldest
 
 int enable = 1;
-int h = 0;
+int h = 0; // Keep track of progress through one second
 
-int i = 0;
-bool ishi = 0;
-int perInd = 0;
+int tick = 0; // Number of ticks at RES frequency for a period
+bool ishi = 0; // Used to determine whether a new period starts
+int perInd = 0; // Which index in the array should we use
 
-int dripIndex = 0;
+int dripIndex = 0; // progress within the drip sequence
+int startupState = 0;
+int blinkcount = 0;
+
+int mode = 0;
 
 void initTimer1();
 void initPins();
 
 void tuneCheck();
 void recordPer(int tick);
-void calcFreq();
+float calcFreq();
+int closeto(int in, int comp, int thresh);
 int calcDiff(float freq, float tru);
 void tuneLED();
 
@@ -38,17 +44,18 @@ int min_ind(int array[], int size);
 int max_ind(int array[], int size);
 int avg(int array[], int size);
 
-void allOn();
+void allLED(int onoff);
 
 void dripIncrement();
 void dripLED();
+void startup();
 
 void lightLEDs();
 
 int main(void)
 {
 	m_disableJTAG();
-	m_clockdivide(0); // System clock 1 MHz
+	m_clockdivide(0); // System clock 16 MHz
 	m_bus_init();
 	m_usb_init();
 	while(!m_usb_isconnected()) {}
@@ -57,52 +64,27 @@ int main(void)
 	initPins();
 
 	sei(); // Enable interrupts
+
+	for (j = 0; j < 6; ++j) {
+		perticks[j] = RES / freqs[j]; // Calculate the period lengths to match each string
+	}
+
 	m_red(ON);
 
 	while(1) {
-		// allOn();
-		// dripLED();
-		tuneLED();
+		switch(mode) {
+			case 0:
+				startup(); break;
+			case 1:
+				tuneLED(); break;
+			case 2:
+				dripLED(); break;
+			default:
+				allLED(0); break;
+		}
 		lightLEDs();
-		// m_usb_tx_int(pers2nd[0]);
-		// m_usb_tx_string(" ");
-		// m_usb_tx_int(pers2nd[1]);
-		// m_usb_tx_string(" ");
-		// m_usb_tx_int(pers2nd[2]);
-		// m_usb_tx_string(" ");
-		// m_usb_tx_int(pers2nd[3]);
-		// m_usb_tx_int(avg(pers2nd, (NUMPERS/2)));
-		// m_usb_tx_string("\n");
 	}
 	return 0;
-}
-
-ISR(TIMER1_OVF_vect) { // When OCR1A is reached (4 kHz)
-	// dripIncrement();
-	tuneCheck();
-}
-
-void tuneCheck() {
-	if (check(PINB, 4)) {
-		if (ishi) {
-			++i;
-		} else {
-			recordPer(i);
-			i = 0;
-			ishi = true;
-		}
-	} else {
-		if (ishi) {
-			ishi = false;
-		}
-		++i;
-	}
-}
-
-void recordPer(int tick) {
-	++perInd;
-	if (perInd >= NUMPERS) {perInd = 0;}
-	pers[perInd] = tick;
 }
 
 void initTimer1() {
@@ -121,7 +103,7 @@ void initTimer1() {
 }
 
 void initPins() {
-	set(DDRB, 2);
+	set(DDRB, 2); // Output pins
 	set(DDRB, 3);
 	set(DDRB, 7);
 	set(DDRD, 3);
@@ -144,188 +126,22 @@ void initPins() {
 	clear(PORTB, 4); // Disable pull-up resistor
 }
 
-int closeto(int in, int comp) {
-	int diff = in - comp;
-	if (diff < 0) {diff = diff * -1;}
-	return (diff < 10);
-}
-
-void tuneLED() {
-	calcFreq();
-	int LED;
-
-	/*
-		If 2 or 3 ~ 240 & 4 > 300 -> E
-		If 2 or 3 ~ 180 -> A
-		If 1/2 ~ 135 & 2/4 ~ 270 -> D
-		If 2 or 3 ~ 100 -> G
-		If 1 or 2 ~ 80 -> B
-		If 1 is ~ 60 -> Hi E
-	*/
-	// m_usb_tx_string("\n");
-	// m_usb_tx_int(harmonics[1]);	
-	// m_usb_tx_string(" ");
-	// m_usb_tx_int(closeto(harmonics[1], 240));
-
-	if (closeto(harmonics[1], 243) || closeto(harmonics[2], 243)) { // E
-		m_usb_tx_string(" E");
-		// if (closeto(harmonics[1], 240)) {
-		// 	m_usb_tx_int(harmonics[1]);			
-		// } else {
-		// 	m_usb_tx_int(harmonics[2]);
-		// }
-	} else if (closeto(harmonics[1], 100) || closeto(harmonics[2], 100)) { // G
-		m_usb_tx_string(" G");
-		// if (closeto(harmonics[1], 100)) {
-		// 	m_usb_tx_int(harmonics[1]);			
-		// } else {
-		// 	m_usb_tx_int(harmonics[2]);
-		// }
-	} else if (closeto(harmonics[1], 80) || (closeto(harmonics[0], 80) && closeto(harmonics[2], 240)) || (closeto(harmonics[0], 160) && closeto(harmonics[2], 320))) { // B
-		m_usb_tx_string(" B");
-		// if (closeto(harmonics[1], 80)) {
-		// 	m_usb_tx_int(harmonics[1]);			
-		// } else {
-		// 	m_usb_tx_int(harmonics[0]);
-		// }
-	} else if (closeto(harmonics[0], 60) && closeto(harmonics[1], 120) && closeto(harmonics[3], 240)) { // Hi E
-		m_usb_tx_string(" Eh");
-		// m_usb_tx_int(harmonics[0]);
-	} else if ((closeto(harmonics[0], 136) && closeto(harmonics[3], 540))) { // D
-		// || (closeto(harmonics[2], 180) && harmonics[0], 50)
-		m_usb_tx_string(" D");
-		// if (closeto(harmonics[0], 136)) {
-		// 	m_usb_tx_int(harmonics[0]);			
-		// } else {
-		// 	m_usb_tx_int(harmonics[1]);
-		// }
-	} else { // A
-		m_usb_tx_string(" A");
-		// if (closeto(harmonics[1], 180)) {
-		// 	m_usb_tx_int(harmonics[1]);			
-		// } else {
-		// 	m_usb_tx_int(harmonics[2]);
-		// }
+ISR(TIMER1_OVF_vect) { // When OCR1A is reached (4 kHz)
+	switch(mode) {
+		case 0:
+			dripIncrement(); break;
+		case 1:
+			tuneCheck(); break;
+		case 2:
+			dripIncrement(); break;
 	}
-
-	// if 		(freq < 70) 	{LED = 0;} 
-	// else if (freq < 96.2) 	{LED = calcDiff(freq, 82.40);} // 242.7
-	// else if (freq < 128.4) 	{LED = calcDiff(freq, 110.0);} // 181.8
-	// else if (freq < 171.4) 	{LED = calcDiff(freq, 146.8);} // 136.2
-	// else if (freq < 221.4) 	{LED = calcDiff(freq, 196.0);} // 102.0
-	// else if (freq < 288.3) 	{LED = calcDiff(freq, 246.9);} // 81.00
-	// else if (freq < 350) 	{LED = calcDiff(freq, 329.6);} // 60.68
-	// else 					{LED = 0;}
-
-	// int j;
-	// for (j = 0; j < 9; ++j) {
-	// 	ledstatus[j] = (j == (LED - 1));
-	// }
-}
-
-void calcFreq() {
-	int j;
-	int k = (perInd+1);
-	for (j = k; j < NUMPERS; ++j) {
-		persShift[(j-k)] = pers[j];
-	}
-	for (j = 0; j < k; ++j) {
-		persShift[(j+k)] = pers[j];
-	}
-
-	for (j = 0; j < (NUMPERS/2); ++j) {
-		pers2nd[j] = persShift[(2*j)] + persShift[(2*j-1)] ;
-	}
-
-	// int maxPer = pers2nd[max_ind(pers2nd, NUMPERS)];
-	// int minPer = pers2nd[min_ind(pers2nd, NUMPERS)];
-
-	// if (maxPer - minPer > PERDIFF) {
-		// m_usb_tx_int((maxPer + minPer)/2);
-		// m_usb_tx_string("\n");
-	// }
-	for (j = 0; j < (NUMPERS/3); ++j) {
-		pers3rd[j] = persShift[(3*j)] + persShift[(3*j-1)] + persShift[(3*j-2)];
-	}
-	m_usb_tx_string("\n");
-	m_usb_tx_int(persShift[0]);
-	m_usb_tx_string(" ");
-	m_usb_tx_int(persShift[1]+persShift[0]);
-	m_usb_tx_string(" ");
-	m_usb_tx_int(persShift[2]+persShift[1]+persShift[0]);
-	m_usb_tx_string(" ");
-	m_usb_tx_int(persShift[3]+persShift[2]+persShift[1]+persShift[0]);
-	harmonics[0] = persShift[0];
-	harmonics[1] = harmonics[0] + persShift[1];
-	harmonics[2] = harmonics[1] + persShift[2];
-	harmonics[3] = harmonics[2] + persShift[3];
-}
-// Find the index of the minimum value of an array
-int min_ind(int array[], int size) {
-	int min = array[0];
-	int ind = 0;
-	int j;
-	for (j = 1; j < size; ++j) {
-		if (array[j] < min) {
-			min = array[j];
-			ind = j;
-		}
-	}
-	return ind;
-}
-
-// Find the index of the maximum value of an array
-int max_ind(int array[], int size) {
-	int max = array[0];
-	int ind = 0;
-	int j;
-	for (j = 1; j < size; ++j) {
-		if (array[j] > max) {
-			max = array[j];
-			ind = j;
-		}
-	}
-	return ind;
-}
-
-int avg(int array[], int size) {
-	int sum = 0;
-	int j;
-	for (j = 0; j < size; ++j) {
-		sum += array[j];
-	}
-	int avgval = sum / size;
-	return avgval;
-}
-
-int calcDiff(float freq, float tru) {
-	float notehi = tru * 1.059463094;
-	float notelo = tru / 1.059463094;
-	float frac;
-	if (freq > tru) {
-		frac = (freq - tru) / (notehi - tru);
-	} else {
-		frac = (freq - tru) / (tru - notelo);
-	}
-	float LEDind = 5 + (frac / FREQTOL);
-	if (LEDind < 1) {LEDind = 1;}
-	if (LEDind > 9) {LEDind = 9;}
-	int LE = LEDind + 0.5;
-	// if(usbDebug) {
-	// 	m_usb_tx_string(" Compto = ");
-	// 	m_usb_tx_int(tru * 10);
-	// 	m_usb_tx_string(" LED = ");
-	// 	m_usb_tx_int(LE);
-	// }
-
-	return LE;
 }
 
 void dripIncrement() {
 	if (h >= RES) {
 		h = 0;
 	}
-	if (h % (RES / 20) == 0) {
+	if (h % (RES / 20) == 0) { // Increment drip state @ 20 Hz
 		++dripIndex;
 	}
 	if (dripIndex >= 20) {
@@ -334,27 +150,155 @@ void dripIncrement() {
 	++h;
 }
 
-void dripLED() {
-	int j;
-	for (j = 0; j < 9; ++j) {
-		if (dripIndex < 10) {
-			ledstatus[j] = (j <= dripIndex);
+void tuneCheck() {
+	if (check(PINB, 4)) { // If signal is high
+		if (ishi) { // If it was already high
+			++tick; // increment
 		} else {
-			ledstatus[j] = ((j+10) >= dripIndex);
+			recordPer(tick); // It was low, is now hi, start a new period
+			tick = 0;
+			ishi = true;
+		}
+	} else { // Low
+		ishi = false;
+		++tick; // Part of the same period
+	}
+}
+
+void recordPer(int ticks) {
+	++perInd;
+	if (perInd >= NUMPERS) {perInd = 0;} // Cycle the index of new measurements
+	pers[perInd] = ticks;
+}
+
+void startup() {
+	if (!startupState) {
+		for (j = 0; j < 9; ++j) {
+			ledstatus[j] = (j <= dripIndex);
+		}
+		if (dripIndex >= 10) {startupState = 1;}
+	} else {
+		if (blinkcount > 3) {
+			mode = 1;
+		} else {
+			allLED(dripIndex % 10 >= 5);
+			if (dripIndex >= 19) {++blinkcount;}
 		}
 	}
 }
 
-void allOn() {
-	ledstatus[0] = 1;
-	ledstatus[1] = 1;
-	ledstatus[2] = 1;
-	ledstatus[3] = 1;
-	ledstatus[4] = 1;
-	ledstatus[5] = 1;
-	ledstatus[6] = 1;
-	ledstatus[7] = 1;
-	ledstatus[8] = 1;
+void tuneLED() {
+	m_green(ON);
+	float freq = calcFreq();
+	int LED;
+	// Which note is likely being played
+	if 		(freq < 70) 	{LED = 0;} 
+	else if (freq < 96.2) 	{LED = calcDiff(freq, freqs[0]);} // 242.7
+	else if (freq < 128.4) 	{LED = calcDiff(freq, freqs[1]);} // 181.8
+	else if (freq < 171.4) 	{LED = calcDiff(freq, freqs[2]);} // 136.2
+	else if (freq < 221.4) 	{LED = calcDiff(freq, freqs[3]);} // 102.0
+	else if (freq < 288.3) 	{LED = calcDiff(freq, freqs[4]);} // 81.00
+	else if (freq < 350) 	{LED = calcDiff(freq, freqs[5]);} // 60.68
+	else 					{LED = 0;}
+	// Light up the correct LED
+	for (j = 0; j < 9; ++j) {
+		ledstatus[j] = (j == (LED - 1));
+	}
+}
+
+float calcFreq() {
+	int k = 0;
+	// Shift the period measurements to start with the most recent one
+	for (j = perInd; j >= 0; --j) {
+		persShift[k] = pers[j];
+		++k;
+	}
+	for (j = (NUMPERS-1); j > perInd; --j) {
+		persShift[k] = pers[j];
+		++k;
+	}
+	int Pa = persShift[0];
+	int Pb = persShift[1];
+	int Pc = persShift[2];
+	int Pd = persShift[3];
+	int Pe = persShift[4];
+	m_usb_tx_string("\r\n");
+
+	m_usb_tx_int(Pa);
+	m_usb_tx_string(" ");
+	m_usb_tx_int(Pb);
+	m_usb_tx_string(" ");
+	m_usb_tx_int(Pc);
+	m_usb_tx_string(" ");
+	m_usb_tx_int(Pd);
+	m_usb_tx_string(" ");
+	m_usb_tx_int(Pe);
+	m_usb_tx_string(" ");
+
+	// Find a repeating pattern and determine the period of repetition
+	int sumtick = 1;
+	if (closeto(Pa, Pb, 2)) {
+		if (Pa != Pb && Pb == Pc) {
+			sumtick = Pb;
+		} else {
+			sumtick = Pa;
+		}
+	} else if (closeto(Pa, Pc, 2)) {
+		sumtick = Pa + Pb;
+	} else if (closeto(Pa, Pd, 2)) {
+		sumtick = Pa + Pb + Pc;
+	} else if (closeto(Pa, Pe, 2)) {
+		sumtick = Pa + Pb + Pc + Pd;
+	}
+	m_usb_tx_int(sumtick);
+	m_usb_tx_string(" ");
+	// Convert to a frequency
+	float prefreq = RES / (float) sumtick;
+	m_usb_tx_int((int)(prefreq*10));	
+	float freq = prefreq * CORRECT;
+	m_usb_tx_string(" ");
+	m_usb_tx_int((int)(freq*10));	
+	return freq;
+}
+
+int closeto(int in, int comp, int thresh) { // Is one number close to another (within thresh)
+	int diff = in - comp;
+	if (diff < 0) {diff = diff * -1;}
+	return (diff <= thresh);
+}
+
+// How close to a given note are we
+int calcDiff(float freq, float tru) {
+	float notehi = tru * TWELTHROOTTWO; // half step up
+	float notelo = tru / TWELTHROOTTWO; // half step down
+	float frac;
+	if (freq > tru) {
+		frac = (freq - tru) / (notehi - tru); // Fraction of the way between one note and another
+	} else {
+		frac = (freq - tru) / (tru - notelo);
+	}
+	float LEDind = 5 + (frac / FREQTOL);
+	if (LEDind < 1) {LEDind = 1;}
+	if (LEDind > 9) {LEDind = 9;}
+	int LE = LEDind + 0.5;
+
+	return LE;
+}
+
+void dripLED() {
+	for (j = 0; j < 9; ++j) {
+		if (dripIndex < 10) {	// First half, incrementally turn LED's on
+			ledstatus[j] = (j <= dripIndex);
+		} else { // Then incrementally turn them off
+			ledstatus[j] = (j+10 >= dripIndex);
+		}
+	}
+}
+
+void allLED(int onoff) {
+	for (j = 0; j < 9; ++j) {
+		ledstatus[j] = onoff;
+	}
 }
 
 void lightLEDs() {
