@@ -4,10 +4,10 @@
 
 #define RES 70000 // Freq of measurements in Hz
 #define NUMPERS 6 // How many recordings to hold onto
-#define FREQTOL 0.05 // How close to the true frequency is good.
-#define	DRIPFREQ 20
+#define FREQTOL 0.5 // How close to the true frequency is good.
+#define	LEDNUM 20
 #define TWELTHROOTTWO 1.059463094
-#define CORRECTGAIN 0.97899257
+#define CORRECTGAIN 0.98
 #define CORRECTBUMP 0.5885
 
 static float freqs[6] = {82.4, 110.0, 146.8, 196.0, 246.9, 329.6}; // Hz
@@ -17,9 +17,11 @@ int j;
 volatile int ledstatus[9] = {0}; // LED is on/off -> 1/0
 int pers[NUMPERS] = {0}; // Most recent period data
 int persShift[NUMPERS] = {0}; // Shifted to be newest to oldest
+int LEDHist[LEDNUM] = {0};
 
 int enable = 1;
 int h = 0; // Keep track of progress through one second
+int g = 0; // Buffer of LED history
 
 int tick = 0; // Number of ticks at RES frequency for a period
 bool ishi = 0; // Used to determine whether a new period starts
@@ -38,6 +40,7 @@ void tuneCheck();
 void recordPer(int tick);
 float calcFreq();
 int closeto(int in, int comp, int thresh);
+int FindSumtick(int a, int b, int c, int d, int e, int thresh);
 int calcDiff(float freq, float tru);
 void tuneLED();
 
@@ -79,6 +82,8 @@ int main(void)
 				tuneLED(); break;
 			case 2:
 				dripLED(); break;
+			case 3:
+				allLED(1); break;
 			default:
 				allLED(0); break;
 		}
@@ -178,7 +183,7 @@ void startup() {
 		}
 		if (dripIndex >= 10) {startupState = 1;}
 	} else {
-		if (blinkcount > 3) {
+		if (blinkcount > 15) {
 			mode = 1;
 		} else {
 			allLED(dripIndex % 10 >= 5);
@@ -190,7 +195,7 @@ void startup() {
 void tuneLED() {
 	m_green(ON);
 	float freq = calcFreq();
-	int LED;
+	int LED = 0;
 	// Which note is likely being played
 	if 		(freq < 70) 	{LED = 0;} 
 	else if (freq < 96.2) 	{LED = calcDiff(freq, freqs[0]);} // 242.7
@@ -200,6 +205,13 @@ void tuneLED() {
 	else if (freq < 288.3) 	{LED = calcDiff(freq, freqs[4]);} // 81.00
 	else if (freq < 350) 	{LED = calcDiff(freq, freqs[5]);} // 60.68
 	else 					{LED = 0;}
+
+	// LEDHist[g] = LED;
+	// ++g;
+	// if (g >= LEDNUM) {
+	// 	g = 0;
+	// }
+	// int smoothLED = avg(LEDHist, LEDNUM);
 	// Light up the correct LED
 	for (j = 0; j < 9; ++j) {
 		ledstatus[j] = (j == (LED - 1));
@@ -224,10 +236,10 @@ float calcFreq() {
 	int Pe = persShift[4];
 	m_usb_tx_string("\r");
 
-	m_usb_tx_int(Pa);
-	m_usb_tx_string(" ");
-	m_usb_tx_int(Pb);
-	m_usb_tx_string(" ");
+	// m_usb_tx_int(Pa);
+	// m_usb_tx_string(" ");
+	// m_usb_tx_int(Pb);
+	// m_usb_tx_string(" ");
 	// m_usb_tx_int(Pc);
 	// m_usb_tx_string(" ");
 	// m_usb_tx_int(Pd);
@@ -237,19 +249,11 @@ float calcFreq() {
 
 	// Find a repeating pattern and determine the period of repetition
 	int sumtick = 1;
-	if (closeto(Pa, Pb, 2)) {
-		if (Pa != Pb && Pb == Pc) {
-			sumtick = Pb;
-		} else {
-			sumtick = Pa;
-		}
-	} else if (closeto(Pa, Pc, 2)) {
-		sumtick = Pa + Pb;
-	} else if (closeto(Pa, Pd, 2)) {
-		sumtick = Pa + Pb + Pc;
-	} else if (closeto(Pa, Pe, 2)) {
-		sumtick = Pa + Pb + Pc + Pd;
+	sumtick = FindSumtick(Pa, Pb, Pc, Pd, Pe, 5);
+	if (sumtick == 1) {
+		sumtick = FindSumtick(Pa, Pb, Pc, Pd, Pe, 15);
 	}
+	
 	// m_usb_tx_int(sumtick);
 	// m_usb_tx_string(" ");
 	// Convert to a frequency
@@ -260,8 +264,22 @@ float calcFreq() {
 	m_usb_tx_int((int)(freq));	
 	m_usb_tx_string(".");
 	m_usb_tx_int(((int)(freq*10) % 10));
-	m_usb_tx_string(" ");	
+	m_usb_tx_string(" ");
 	return freq;
+}
+
+int FindSumtick(int a, int b, int c, int d, int e, int thresh) {
+	int sumtick = 1;
+	if (closeto(a, b, thresh) && (RES / a > 70) && (RES / a < 350)) {
+			sumtick = a;
+	} else if (closeto(a, c, thresh) && (RES / (a+b) > 70) && (RES / (a+b) < 350)) {
+		sumtick = a + b;
+	} else if (closeto(a, d, thresh) && (RES / (a+b+c) > 70) && (RES / (a+b+c) < 350)) {
+		sumtick = a + b + c;
+	} else if (closeto(a, e, thresh) && (RES / (a+b+c+d) > 70) && (RES / (a+b+c+d) < 350)) {
+		sumtick = a + b + c + d;
+	}
+	return sumtick;
 }
 
 int closeto(int in, int comp, int thresh) { // Is one number close to another (within thresh)
@@ -283,6 +301,9 @@ int calcDiff(float freq, float tru) {
 	float LEDind = 5 + (frac / FREQTOL);
 	if (LEDind < 1) {LEDind = 1;}
 	if (LEDind > 9) {LEDind = 9;}
+
+
+
 	int LE = LEDind + 0.5;
 	m_usb_tx_int((int)(tru));	
 	m_usb_tx_string(" ");
@@ -318,4 +339,16 @@ void lightLEDs() {
 		if (ledstatus[7]) {set(PORTF, 0);} else {clear(PORTF, 0);}
 		if (ledstatus[8]) {set(PORTF, 1);} else {clear(PORTF, 1);}
 	}
+}
+
+// Find the index of the minimum value of an array
+int avg(int array[], int size) {
+	int sum = 0;
+	int j;
+	for (j = 1; j < size; ++j) {
+		sum += array[j];
+	}
+	float aver = (float) sum / LEDNUM;
+	int avrint = aver + 0.5;
+	return avrint;
 }
