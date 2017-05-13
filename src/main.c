@@ -3,12 +3,14 @@
 #include "m_usb.h"
 
 #define RES 70000 // Freq of measurements in Hz
-#define NUMPERS 6 // How many recordings to hold onto
+#define NUMPERS 6 // How many recordings to hold on to
 #define FREQTOL 0.5 // How close to the true frequency is good.
 #define	LEDNUM 20
 #define TWELTHROOTTWO 1.059463094
 #define CORRECTGAIN 0.98
 #define CORRECTBUMP 0.5885
+
+#define DEBUGLEVEL 1
 
 static float freqs[6] = {82.4, 110.0, 146.8, 196.0, 246.9, 329.6}; // Hz
 static float perticks[6] = {0}; // To be calculated
@@ -62,7 +64,7 @@ int main(void)
 	m_clockdivide(0); // System clock 16 MHz
 	m_bus_init();
 	m_usb_init();
-	while(!m_usb_isconnected()) {}
+	// while(!m_usb_isconnected()) {}
 
 	initTimer1();
 	initPins();
@@ -75,6 +77,11 @@ int main(void)
 
 	m_red(ON);
 	while(1) {
+		if (DEBUGLEVEL) {
+			m_usb_tx_string("\n");
+			m_usb_tx_int(mode);
+			m_usb_tx_string(" ");
+		}
 		switch(mode) {
 			case 0:
 				startup(); break;
@@ -161,7 +168,7 @@ void tuneCheck() {
 			++tick; // increment
 		} else {
 			recordPer(tick); // It was low, is now hi, start a new period
-			tick = 0;
+			tick = 1;
 			ishi = true;
 		}
 	} else { // Low
@@ -183,7 +190,7 @@ void startup() {
 		}
 		if (dripIndex >= 10) {startupState = 1;}
 	} else {
-		if (blinkcount > 15) {
+		if (blinkcount > 7) {
 			mode = 1;
 		} else {
 			allLED(dripIndex % 10 >= 5);
@@ -206,15 +213,15 @@ void tuneLED() {
 	else if (freq < 350) 	{LED = calcDiff(freq, freqs[5]);} // 60.68
 	else 					{LED = 0;}
 
-	// LEDHist[g] = LED;
-	// ++g;
-	// if (g >= LEDNUM) {
-	// 	g = 0;
-	// }
-	// int smoothLED = avg(LEDHist, LEDNUM);
+	LEDHist[g] = LED;
+	++g;
+	if (g >= LEDNUM) {
+		g = 0;
+	}
+	int smoothLED = avg(LEDHist, LEDNUM);
 	// Light up the correct LED
 	for (j = 0; j < 9; ++j) {
-		ledstatus[j] = (j == (LED - 1));
+		ledstatus[j] = (j == (smoothLED - 1));
 	}
 }
 
@@ -234,18 +241,6 @@ float calcFreq() {
 	int Pc = persShift[2];
 	int Pd = persShift[3];
 	int Pe = persShift[4];
-	m_usb_tx_string("\r");
-
-	// m_usb_tx_int(Pa);
-	// m_usb_tx_string(" ");
-	// m_usb_tx_int(Pb);
-	// m_usb_tx_string(" ");
-	// m_usb_tx_int(Pc);
-	// m_usb_tx_string(" ");
-	// m_usb_tx_int(Pd);
-	// m_usb_tx_string(" ");
-	// m_usb_tx_int(Pe);
-	// m_usb_tx_string(" ");
 
 	// Find a repeating pattern and determine the period of repetition
 	int sumtick = 1;
@@ -253,18 +248,37 @@ float calcFreq() {
 	if (sumtick == 1) {
 		sumtick = FindSumtick(Pa, Pb, Pc, Pd, Pe, 15);
 	}
-	
-	// m_usb_tx_int(sumtick);
-	// m_usb_tx_string(" ");
+
 	// Convert to a frequency
 	float prefreq = RES / (float) sumtick;
-	// m_usb_tx_int((int)(prefreq*10));	
-	// m_usb_tx_string(" ");
 	float freq = prefreq * CORRECTGAIN + CORRECTBUMP;
-	m_usb_tx_int((int)(freq));	
-	m_usb_tx_string(".");
-	m_usb_tx_int(((int)(freq*10) % 10));
-	m_usb_tx_string(" ");
+	
+	if (DEBUGLEVEL == 2) {
+		m_usb_tx_int(Pa);
+		m_usb_tx_string(" ");
+		m_usb_tx_int(Pb);
+		m_usb_tx_string(" ");
+		m_usb_tx_int(Pc);
+		m_usb_tx_string(" ");
+		m_usb_tx_int(Pd);
+		m_usb_tx_string(" ");
+		m_usb_tx_int(Pe);
+		m_usb_tx_string(" ");
+	}
+
+	if (DEBUGLEVEL == 1) {
+		m_usb_tx_int(sumtick);
+		m_usb_tx_string(" ");
+
+		// m_usb_tx_int((int)(prefreq*10));	
+		// m_usb_tx_string(" ");
+
+		m_usb_tx_int((int)(freq));	
+		m_usb_tx_string(".");
+		m_usb_tx_int(((int)(freq*10) % 10));
+		m_usb_tx_string(" ");
+	}
+
 	return freq;
 }
 
@@ -302,12 +316,11 @@ int calcDiff(float freq, float tru) {
 	if (LEDind < 1) {LEDind = 1;}
 	if (LEDind > 9) {LEDind = 9;}
 
-
-
-	int LE = LEDind + 0.5;
-	m_usb_tx_int((int)(tru));	
-	m_usb_tx_string(" ");
-	m_usb_tx_int(LE);
+	int LE = LEDind + 0.5; // Round
+	if (DEBUGLEVEL) {
+		m_usb_tx_int(LE);
+		m_usb_tx_string(" ");
+	}
 	return LE;
 }
 
@@ -328,17 +341,15 @@ void allLED(int onoff) {
 }
 
 void lightLEDs() {
-	if (enable){
-		if (ledstatus[0]) {set(PORTB, 2);} else {clear(PORTB, 2);}
-		if (ledstatus[1]) {set(PORTB, 3);} else {clear(PORTB, 3);}
-		if (ledstatus[2]) {set(PORTB, 7);} else {clear(PORTB, 7);}
-		if (ledstatus[3]) {set(PORTD, 3);} else {clear(PORTD, 3);}
-		if (ledstatus[4]) {set(PORTD, 4);} else {clear(PORTD, 4);}
-		if (ledstatus[5]) {set(PORTD, 5);} else {clear(PORTD, 5);}
-		if (ledstatus[6]) {set(PORTD, 6);} else {clear(PORTD, 6);}
-		if (ledstatus[7]) {set(PORTF, 0);} else {clear(PORTF, 0);}
-		if (ledstatus[8]) {set(PORTF, 1);} else {clear(PORTF, 1);}
-	}
+	if (ledstatus[0] && enable) {set(PORTB, 2);} else {clear(PORTB, 2);}
+	if (ledstatus[1] && enable) {set(PORTB, 3);} else {clear(PORTB, 3);}
+	if (ledstatus[2] && enable) {set(PORTB, 7);} else {clear(PORTB, 7);}
+	if (ledstatus[3] && enable) {set(PORTD, 3);} else {clear(PORTD, 3);}
+	if (ledstatus[4] && enable) {set(PORTD, 4);} else {clear(PORTD, 4);}
+	if (ledstatus[5] && enable) {set(PORTD, 5);} else {clear(PORTD, 5);}
+	if (ledstatus[6] && enable) {set(PORTD, 6);} else {clear(PORTD, 6);}
+	if (ledstatus[7] && enable) {set(PORTF, 0);} else {clear(PORTF, 0);}
+	if (ledstatus[8] && enable) {set(PORTF, 1);} else {clear(PORTF, 1);}
 }
 
 // Find the index of the minimum value of an array
@@ -348,7 +359,7 @@ int avg(int array[], int size) {
 	for (j = 1; j < size; ++j) {
 		sum += array[j];
 	}
-	float aver = (float) sum / LEDNUM;
+	float aver = (float) sum / size;
 	int avrint = aver + 0.5;
 	return avrint;
 }
