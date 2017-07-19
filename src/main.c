@@ -13,6 +13,8 @@
 #define DEBUGLEVEL 1
 
 static float freqs[6] = {82.4, 110.0, 146.8, 196.0, 246.9, 329.6}; // Hz
+static int freqmin = 70; // Minimum frequency that will be conisdered
+static int freqmax = 350; // Maximum frequency that will be conisdered
 static float perticks[6] = {0}; // To be calculated
 int j;
 
@@ -204,13 +206,13 @@ void tuneLED() {
 	float freq = calcFreq();
 	int LED = 0;
 	// Which note is likely being played
-	if 		(freq < 70) 	{LED = 0;} 
+	if 		(freq < freqmin){LED = 0;} 
 	else if (freq < 96.2) 	{LED = calcDiff(freq, freqs[0]);} // 242.7
 	else if (freq < 128.4) 	{LED = calcDiff(freq, freqs[1]);} // 181.8
 	else if (freq < 171.4) 	{LED = calcDiff(freq, freqs[2]);} // 136.2
 	else if (freq < 221.4) 	{LED = calcDiff(freq, freqs[3]);} // 102.0
 	else if (freq < 288.3) 	{LED = calcDiff(freq, freqs[4]);} // 81.00
-	else if (freq < 350) 	{LED = calcDiff(freq, freqs[5]);} // 60.68
+	else if (freq < freqmax){LED = calcDiff(freq, freqs[5]);} // 60.68
 	else 					{LED = 0;}
 
 	LEDHist[g] = LED;
@@ -284,13 +286,13 @@ float calcFreq() {
 
 int FindSumtick(int a, int b, int c, int d, int e, int thresh) {
 	int sumtick = 1;
-	if (closeto(a, b, thresh) && (RES / a > 70) && (RES / a < 350)) {
+	if (closeto(a, b, thresh) && (RES / a > freqmin) && (RES / a < freqmax)) {
 			sumtick = a;
-	} else if (closeto(a, c, thresh) && (RES / (a+b) > 70) && (RES / (a+b) < 350)) {
+	} else if (closeto(a, c, thresh) && (RES / (a+b) > freqmin) && (RES / (a+b) < freqmax)) {
 		sumtick = a + b;
-	} else if (closeto(a, d, thresh) && (RES / (a+b+c) > 70) && (RES / (a+b+c) < 350)) {
+	} else if (closeto(a, d, thresh) && (RES / (a+b+c) > freqmin) && (RES / (a+b+c) < freqmax)) {
 		sumtick = a + b + c;
-	} else if (closeto(a, e, thresh) && (RES / (a+b+c+d) > 70) && (RES / (a+b+c+d) < 350)) {
+	} else if (closeto(a, e, thresh) && (RES / (a+b+c+d) > freqmin) && (RES / (a+b+c+d) < freqmax)) {
 		sumtick = a + b + c + d;
 	}
 	return sumtick;
